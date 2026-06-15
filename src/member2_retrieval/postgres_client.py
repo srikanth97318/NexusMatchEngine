@@ -1,24 +1,177 @@
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+from sqlalchemy import create_engine, Column, String, Integer, Text, DateTime, JSON
+from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session
 from src.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+Base = declarative_base()
+
+
+class CandidateModel(Base):
+    __tablename__ = "candidates"
+    
+    id = Column(String(50), primary_key=True)
+    name = Column(String(100), nullable=False)
+    email = Column(String(100), nullable=True)
+    phone = Column(String(50), nullable=True)
+    skills = Column(JSON, nullable=True)  # List of strings
+    experience = Column(JSON, nullable=True)  # List of WorkExperience dicts
+    education = Column(JSON, nullable=True)  # List of Education dicts
+    raw_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class JobDescriptionModel(Base):
+    __tablename__ = "job_descriptions"
+    
+    id = Column(String(50), primary_key=True)
+    title = Column(String(150), nullable=False)
+    department = Column(String(100), nullable=True)
+    required_skills = Column(JSON, nullable=True)  # List of strings
+    preferred_skills = Column(JSON, nullable=True)  # List of strings
+    min_experience_years = Column(Integer, default=0)
+    location = Column(String(100), nullable=True)
+    visa_requirement = Column(String(100), nullable=True)
+    full_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class PostgresStateClient:
     """Relational storage tier for caching structured entities and logs."""
     
-    def __init__(self):
-        logger.info(f"Connecting to PostgreSQL database at: {settings.DATABASE_URL.split('@')[-1]}")
-        # In production, initialize SQL Alchemy engine/sessionmakers
+    def __init__(self, db_url: Optional[str] = None):
+        self.db_url = db_url or settings.DATABASE_URL
         
-    def store_candidate(self, candidate_id: str, profile_data: Dict[str, Any]) -> bool:
+        try:
+            logger.info("Initializing connection engine...")
+            self.engine = create_engine(self.db_url, pool_pre_ping=True)
+            # Test connection
+            with self.engine.connect() as conn:
+                pass
+            logger.info("Connected to PostgreSQL successfully.")
+        except Exception as e:
+            logger.warning(f"PostgreSQL connection to {self.db_url} failed: {e}. Falling back to SQLite in-memory database.")
+            self.db_url = "sqlite:///:memory:"
+            self.engine = create_engine(self.db_url)
+            
+        self.session_factory = sessionmaker(bind=self.engine)
+        self.Session = scoped_session(self.session_factory)
+        
+        self.create_tables()
+        
+    def create_tables(self):
+        try:
+            Base.metadata.create_all(self.engine)
+            logger.info("Postgres database schemas initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to create schema tables: {e}")
+            
+    def store_candidate(self, candidate_id: str, profile_data: Dict[str, Any], raw_text: Optional[str] = None) -> bool:
         """Store structured Candidate profile in permanent relational state."""
-        logger.info(f"SQL INSERT candidate profile: {candidate_id}")
-        return True
-        
-    def get_candidate(self, candidate_id: str) -> Dict[str, Any]:
+        session = self.Session()
+        try:
+            candidate = session.query(CandidateModel).filter_by(id=candidate_id).first()
+            if not candidate:
+                candidate = CandidateModel(id=candidate_id)
+                session.add(candidate)
+                
+            candidate.name = profile_data.get("name", "Unknown")
+            candidate.email = profile_data.get("email")
+            candidate.phone = profile_data.get("phone")
+            candidate.skills = profile_data.get("skills", [])
+            candidate.experience = profile_data.get("experience", [])
+            candidate.education = profile_data.get("education", [])
+            candidate.raw_text = raw_text or profile_data.get("raw_text", "")
+            candidate.created_at = datetime.utcnow()
+            
+            session.commit()
+            logger.info(f"Successfully stored candidate profile: {candidate_id}")
+            return True
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error executing store_candidate for {candidate_id}: {e}")
+            return False
+        finally:
+            self.Session.remove()
+            
+    def get_candidate(self, candidate_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve candidate profile details from tables."""
-        logger.info(f"SQL SELECT candidate: {candidate_id}")
-        return {"id": candidate_id, "data": "Relational state metadata placeholder"}
+        session = self.Session()
+        try:
+            candidate = session.query(CandidateModel).filter_by(id=candidate_id).first()
+            if not candidate:
+                return None
+            return {
+                "id": candidate.id,
+                "name": candidate.name,
+                "email": candidate.email,
+                "phone": candidate.phone,
+                "skills": candidate.skills,
+                "experience": candidate.experience,
+                "education": candidate.education,
+                "raw_text": candidate.raw_text,
+                "created_at": candidate.created_at.isoformat() if candidate.created_at else None
+            }
+        except Exception as e:
+            logger.error(f"Error fetching candidate {candidate_id}: {e}")
+            return None
+        finally:
+            self.Session.remove()
+
+    def store_job_description(self, job_id: str, jd_data: Dict[str, Any]) -> bool:
+        """Store structured Job Description metadata in permanent relational state."""
+        session = self.Session()
+        try:
+            jd = session.query(JobDescriptionModel).filter_by(id=job_id).first()
+            if not jd:
+                jd = JobDescriptionModel(id=job_id)
+                session.add(jd)
+                
+            jd.title = jd_data.get("title", "Unknown Job Title")
+            jd.department = jd_data.get("department")
+            jd.required_skills = jd_data.get("required_skills", [])
+            jd.preferred_skills = jd_data.get("preferred_skills", [])
+            jd.min_experience_years = jd_data.get("min_experience_years", 0)
+            jd.location = jd_data.get("location")
+            jd.visa_requirement = jd_data.get("visa_requirement")
+            jd.full_text = jd_data.get("full_text", "")
+            jd.created_at = datetime.utcnow()
+            
+            session.commit()
+            logger.info(f"Successfully stored job description: {job_id}")
+            return True
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error executing store_job_description for {job_id}: {e}")
+            return False
+        finally:
+            self.Session.remove()
+
+    def get_job_description(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve job description details from tables."""
+        session = self.Session()
+        try:
+            jd = session.query(JobDescriptionModel).filter_by(id=job_id).first()
+            if not jd:
+                return None
+            return {
+                "id": jd.id,
+                "title": jd.title,
+                "department": jd.department,
+                "required_skills": jd.required_skills,
+                "preferred_skills": jd.preferred_skills,
+                "min_experience_years": jd.min_experience_years,
+                "location": jd.location,
+                "visa_requirement": jd.visa_requirement,
+                "full_text": jd.full_text,
+                "created_at": jd.created_at.isoformat() if jd.created_at else None
+            }
+        except Exception as e:
+            logger.error(f"Error fetching job description {job_id}: {e}")
+            return None
+        finally:
+            self.Session.remove()
