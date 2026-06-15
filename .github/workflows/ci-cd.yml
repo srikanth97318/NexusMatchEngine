@@ -26,14 +26,14 @@ jobs:
           --health-retries 5
 
       qdrant:
-        image: qdrant/qdrant:latest
+        image: qdrant/qdrant:v1.9.0
         ports:
           - 6333:6333
         options: >-
           --health-cmd "curl --fail http://localhost:6333/readyz || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
       redis:
         image: redis:alpine
