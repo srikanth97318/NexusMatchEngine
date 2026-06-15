@@ -380,31 +380,6 @@ Penalizes abnormal keyword density.
 
 ---
 
-# 📂 Project Structure
-
-```text
-NexusMatch/
-│
-├── app/
-│   ├── api/
-│   ├── parser/
-│   ├── retrieval/
-│   ├── ranking/
-│   ├── explainability/
-│   └── ui/
-│
-├── models/
-├── embeddings/
-├── docker/
-├── tests/
-├── requirements.txt
-├── docker-compose.yml
-├── README.md
-└── LICENSE
-```
-
----
-
 # ⚙ Installation
 
 ## Clone Repository
