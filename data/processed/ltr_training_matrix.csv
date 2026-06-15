@@ -1,0 +1,4 @@
+candidate_id,job_id,experience_years,skill_match_score,trajectory_velocity,semantic_similarity,label
+cand_001,job_101,5.2,0.85,1.2,0.78,1
+cand_002,job_101,2.1,0.45,0.8,0.52,0
+cand_003,job_101,8.0,0.92,0.9,0.81,1
