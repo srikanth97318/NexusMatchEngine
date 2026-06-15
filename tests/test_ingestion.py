@@ -4,15 +4,15 @@ from src.member1_ingestion.schemas import CandidateProfile
 
 
 def test_docling_parser_stub(tmp_path):
-    # Setup temporary file
-    test_file = tmp_path / "resume_jane.pdf"
+    # Setup temporary file as text so Docling parses it correctly without PDF binary expectations
+    test_file = tmp_path / "resume_jane.txt"
     test_file.write_text("Unstructured resume content")
     
     parser = DoclingLayoutParser()
     result = parser.parse_document(test_file)
     
     assert "metadata" in result
-    assert result["metadata"]["file_name"] == "resume_jane.pdf"
+    assert result["metadata"]["file_name"] == "resume_jane.txt"
     assert "raw_text" in result
 
 

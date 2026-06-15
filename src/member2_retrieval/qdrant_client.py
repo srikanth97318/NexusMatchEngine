@@ -3,8 +3,12 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 from src.config import settings
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, SparseVectorParams, SparseIndexParams, PointStruct, SparseVector, NamedSparseVector
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import Distance, VectorParams, SparseVectorParams, SparseIndexParams, PointStruct, SparseVector, NamedSparseVector
+    QDRANT_AVAILABLE = True
+except ImportError:
+    QDRANT_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,6 +52,9 @@ class QdrantVectorClient:
     """Client handling hybrid vector collection setup, indexes, and queries in Qdrant."""
     
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
+        if not QDRANT_AVAILABLE:
+            raise ImportError("The 'qdrant-client' library is required to run QdrantVectorClient. Please install it using pip.")
+            
         self.host = host or settings.QDRANT_HOST
         self.port = port or settings.QDRANT_PORT
         

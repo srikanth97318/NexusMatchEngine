@@ -10,8 +10,12 @@ from src.member2_retrieval.postgres_client import PostgresStateClient
 from src.member2_retrieval.embedder import BGEM3Embedder
 from src.member2_retrieval.qdrant_client import QdrantVectorClient
 
-import instructor
-from openai import OpenAI
+try:
+    import instructor
+    from openai import OpenAI
+    INSTRUCTOR_AVAILABLE = True
+except ImportError:
+    INSTRUCTOR_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +34,9 @@ def ingest_resume_pipeline(file_path_str: str) -> dict:
     Returns:
         Dict representing validated CandidateProfile data.
     """
+    if not INSTRUCTOR_AVAILABLE:
+        raise ImportError("The 'instructor' and 'openai' libraries are required to run the ingest_resume_pipeline task. Please install them using pip.")
+        
     logger.info(f"Triggered Celery task to parse resume: {file_path_str}")
     path = Path(file_path_str)
     

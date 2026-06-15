@@ -3,7 +3,11 @@ import hashlib
 from typing import Dict, List, Any, Optional
 from src.config import settings
 
-from FlagEmbedding import BGEM3FlagModel
+try:
+    from FlagEmbedding import BGEM3FlagModel
+    FLAG_EMBEDDING_AVAILABLE = True
+except ImportError:
+    FLAG_EMBEDDING_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,6 +17,9 @@ class BGEM3Embedder:
     """BGE-M3 multi-vector embedding engine supporting Dense, Sparse, & Late-interaction tensors."""
     
     def __init__(self, model_name: Optional[str] = None, use_fp16: bool = False):
+        if not FLAG_EMBEDDING_AVAILABLE:
+            raise ImportError("The 'FlagEmbedding' library is required to run the native BGEM3Embedder. Please install it using pip.")
+            
         self.model_name = model_name or settings.BGE_MODEL_NAME
         self.use_fp16 = use_fp16
         self.dimension = 1024

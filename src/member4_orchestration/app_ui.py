@@ -9,18 +9,55 @@ st.subheader("Interactive Talent Matching, LTR Re-ranking, and Explainability St
 
 st.markdown("""
 This interface interacts with the FastAPI backend orchestration layer. 
-Upload resumes to ingest profiles or enter job requirements below to evaluate candidates.
+Upload resumes to ingest profiles or enter job requirements below to evaluate candidates in real-time.
 """)
 
 # Backend server address
 API_URL = "http://localhost:8000"
+
+# 1. Fetch Real-time Dashboard Metrics from PostgreSQL
+try:
+    metrics_response = requests.get(f"{API_URL}/metrics", timeout=3.0)
+    if metrics_response.status_code == 200:
+        metrics = metrics_response.json()
+    else:
+        metrics = {}
+except Exception:
+    metrics = {}
+
+# Render Metrics Row
+st.markdown("### 📊 Database Statistics (Real-time)")
+m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+
+with m_col1:
+    st.metric("Total Candidates Ingested", metrics.get("total_candidates", 0))
+with m_col2:
+    st.metric("Active Job Descriptions", metrics.get("total_jobs", 0))
+with m_col3:
+    st.metric("Avg Experience (Years)", f"{metrics.get('avg_experience_years', 0.0)} yrs")
+with m_col4:
+    top_skills_dict = metrics.get("top_skills", {})
+    skills_str = ", ".join([f"{k} ({v})" for k, v in top_skills_dict.items()]) if top_skills_dict else "None"
+    st.metric("Top Skills in Repository", skills_str)
+
+st.markdown("---")
 
 # Sidebar controls
 st.sidebar.header("📁 Ingestion Panel")
 uploaded_file = st.sidebar.file_uploader("Upload Candidate Resume (PDF / DOCX)", type=["pdf", "docx"])
 if uploaded_file is not None:
     if st.sidebar.button("Process Resume"):
-        st.sidebar.info("Queued Celery background ingestion pipeline...")
+        # Make a real POST request to the FastAPI backend uploader
+        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+        try:
+            response = requests.post(f"{API_URL}/ingest/resume", files=files, timeout=5.0)
+            if response.status_code == 200:
+                data = response.json()
+                st.sidebar.success(f"Resume queued! Task ID: {data.get('task_id')}")
+            else:
+                st.sidebar.error(f"Ingestion failed: {response.text}")
+        except Exception as e:
+            st.sidebar.error(f"Error connecting to API server: {e}")
 
 # Main dashboard columns
 col1, col2 = st.columns([1, 1])
@@ -37,40 +74,42 @@ with col1:
 with col2:
     st.header("🏆 Matched Candidates")
     if st.button("Run Match Engine Execution Loop", type="primary"):
-        # Mock request to FastAPI backend
         skills_list = [s.strip() for s in skills_required.split(",")]
         
         st.write("🔍 Running BGE-M3 Dense/Sparse embedding generations...")
         st.write("🛰️ Querying Qdrant index vector partitions...")
         st.write("⚡ Computing LambdaMART feature engineering matrices...")
         
-        # Mock response mimicking FastAPI backend output
-        mock_results = [
-            {
-                "rank": 1,
-                "id": "cand_001",
-                "name": "Jane Doe",
-                "ltr_score": 0.82,
-                "llm_rationale": "Strong fit. Over 5 years of Python & ML. Mentions Qdrant explicitly.",
-                "shap": {"skill_match_score": 0.35, "semantic_similarity": 0.25, "trajectory_velocity": 0.15, "exp_ratio": 0.07}
-            },
-            {
-                "rank": 2,
-                "id": "cand_003",
-                "name": "Alice Smith",
-                "ltr_score": 0.71,
-                "llm_rationale": "High experience match. Lacks explicit Qdrant experience but strong ML history.",
-                "shap": {"skill_match_score": 0.20, "semantic_similarity": 0.30, "trajectory_velocity": 0.12, "exp_ratio": 0.09}
-            }
-        ]
+        # Make a real POST request to match candidates
+        payload = {
+            "job_description_id": job_id,
+            "job_text": jd_text,
+            "required_skills": skills_list,
+            "min_experience_years": min_exp,
+            "top_k": 5
+        }
         
-        for res in mock_results:
-            with st.container():
-                st.write(f"### Rank {res['rank']}: {res['name']} ({res['id']})")
-                st.write(f"**Final Score:** `{res['ltr_score']:.2f}`")
-                st.write(f"**LLM Explainability Rationale:** {res['llm_rationale']}")
+        try:
+            response = requests.post(f"{API_URL}/match", json=payload, timeout=10.0)
+            if response.status_code == 200:
+                results = response.json().get("results", [])
                 
-                # Render feature importance charts
-                shap_df = pd.DataFrame(list(res['shap'].items()), columns=["Feature", "Impact (SHAP)"])
-                st.bar_chart(shap_df.set_index("Feature"))
-                st.markdown("---")
+                if not results:
+                    st.warning("No matching candidates found in the vector index. Upload resumes first to build the database!")
+                
+                for res in results:
+                    with st.container():
+                        st.write(f"### Rank {res.get('listwise_rank', 'N/A')}: {res.get('name')} ({res.get('id')})")
+                        st.write(f"**Final Rerank Score:** `{res.get('ltr_score', 0.0):.4f}` (Initial Similarity: `{res.get('initial_score', 0.0):.4f}`)")
+                        st.write(f"**LLM Explainability Rationale:** {res.get('llm_rationale')}")
+                        
+                        # Render actual feature importance charts (SHAP)
+                        shap_values = res.get("shap_values", {})
+                        if shap_values:
+                            shap_df = pd.DataFrame(list(shap_values.items()), columns=["Feature", "Impact (SHAP)"])
+                            st.bar_chart(shap_df.set_index("Feature"))
+                        st.markdown("---")
+            else:
+                st.error(f"Match query failed: {response.text}")
+        except Exception as e:
+            st.error(f"Error querying match API: {e}")

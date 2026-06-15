@@ -175,3 +175,44 @@ class PostgresStateClient:
             return None
         finally:
             self.Session.remove()
+
+    def get_dashboard_metrics(self) -> Dict[str, Any]:
+        """Aggregate relational stats for the recruiter dashboard."""
+        session = self.Session()
+        try:
+            total_candidates = session.query(CandidateModel).count()
+            total_jobs = session.query(JobDescriptionModel).count()
+            
+            candidates = session.query(CandidateModel).all()
+            total_exp_years = 0.0
+            all_skills = []
+            
+            for c in candidates:
+                exp_list = c.experience or []
+                months = sum(e.get("duration_months", 0) for e in exp_list)
+                total_exp_years += (months / 12.0)
+                all_skills.extend(c.skills or [])
+                
+            avg_exp = float(total_exp_years / total_candidates) if total_candidates > 0 else 0.0
+            
+            skill_counts = {}
+            for s in all_skills:
+                skill_counts[s] = skill_counts.get(s, 0) + 1
+            top_skills = dict(sorted(skill_counts.items(), key=lambda x: x[1], reverse=True)[:5])
+            
+            return {
+                "total_candidates": total_candidates,
+                "total_jobs": total_jobs,
+                "avg_experience_years": round(avg_exp, 1),
+                "top_skills": top_skills
+            }
+        except Exception as e:
+            logger.error(f"Failed to query dashboard metrics: {e}")
+            return {
+                "total_candidates": 0,
+                "total_jobs": 0,
+                "avg_experience_years": 0.0,
+                "top_skills": {}
+            }
+        finally:
+            self.Session.remove()

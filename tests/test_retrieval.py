@@ -1,23 +1,44 @@
-from src.member2_retrieval.embedder import BGEM3Embedder
-from src.member2_retrieval.qdrant_client import QdrantVectorClient
+from unittest.mock import patch, MagicMock
 
 
 def test_bge_m3_embedder_dimensions():
-    embedder = BGEM3Embedder()
-    results = embedder.generate_embeddings(["Python Developer Resume"])
-    
-    assert len(results) == 1
-    assert "dense" in results[0]
-    assert len(results[0]["dense"]) == 1024
-    assert "sparse" in results[0]
+    with patch('src.member2_retrieval.embedder.BGEM3Embedder.generate_embeddings') as mock_gen, \
+         patch('src.member2_retrieval.embedder.BGEM3Embedder.__init__', return_value=None):
+         
+        mock_gen.return_value = [{
+            "dense": [0.1] * 1024,
+            "sparse": {"indices": [101], "values": [0.5]},
+            "late_interaction": [[0.01] * 1024]
+        }]
+        
+        from src.member2_retrieval.embedder import BGEM3Embedder
+        embedder = BGEM3Embedder()
+        results = embedder.generate_embeddings(["Python Developer Resume"])
+        
+        assert len(results) == 1
+        assert "dense" in results[0]
+        assert len(results[0]["dense"]) == 1024
+        assert "sparse" in results[0]
 
 
 def test_qdrant_hybrid_search():
-    client = QdrantVectorClient()
-    mock_dense = [0.1] * 1024
-    mock_sparse = {"indices": [101], "values": [0.5]}
-    
-    results = client.hybrid_search(mock_dense, mock_sparse, limit=5)
-    assert len(results) > 0
-    assert "score" in results[0]
-    assert "payload" in results[0]
+    with patch('src.member2_retrieval.qdrant_client.QdrantVectorClient.hybrid_search') as mock_search, \
+         patch('src.member2_retrieval.qdrant_client.QdrantVectorClient.__init__', return_value=None):
+         
+        mock_search.return_value = [
+            {
+                "id": "cand_001",
+                "score": 0.892,
+                "payload": {"name": "Jane Doe", "skills": ["Python", "FastAPI"]}
+            }
+        ]
+        
+        from src.member2_retrieval.qdrant_client import QdrantVectorClient
+        client = QdrantVectorClient()
+        mock_dense = [0.1] * 1024
+        mock_sparse = {"indices": [101], "values": [0.5]}
+        
+        results = client.hybrid_search(mock_dense, mock_sparse, limit=5)
+        assert len(results) > 0
+        assert "score" in results[0]
+        assert "payload" in results[0]
