@@ -57,6 +57,8 @@ data/raw/job_descriptions/*
 !data/raw/job_descriptions/.gitkeep
 data/raw/candidate_resumes/*
 !data/raw/candidate_resumes/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
 
 # Machine Learning models
 src/member3_ranking/model/*.txt
