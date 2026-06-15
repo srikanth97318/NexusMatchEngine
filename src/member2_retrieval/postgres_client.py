@@ -13,7 +13,7 @@ Base = declarative_base()
 
 class CandidateModel(Base):
     __tablename__ = "candidates"
-    
+
     id = Column(String(50), primary_key=True)
     name = Column(String(100), nullable=False)
     email = Column(String(100), nullable=True)
@@ -27,7 +27,7 @@ class CandidateModel(Base):
 
 class JobDescriptionModel(Base):
     __tablename__ = "job_descriptions"
-    
+
     id = Column(String(50), primary_key=True)
     title = Column(String(150), nullable=False)
     department = Column(String(100), nullable=True)
@@ -42,10 +42,10 @@ class JobDescriptionModel(Base):
 
 class PostgresStateClient:
     """Relational storage tier for caching structured entities and logs."""
-    
+
     def __init__(self, db_url: Optional[str] = None):
         self.db_url = db_url or settings.DATABASE_URL
-        
+
         try:
             logger.info("Initializing connection engine...")
             self.engine = create_engine(self.db_url, pool_pre_ping=True)
@@ -54,23 +54,30 @@ class PostgresStateClient:
                 pass
             logger.info("Connected to PostgreSQL successfully.")
         except Exception as e:
-            logger.warning(f"PostgreSQL connection to {self.db_url} failed: {e}. Falling back to SQLite in-memory database.")
+            logger.warning(
+                f"PostgreSQL connection to {self.db_url} failed: {e}. Falling back to SQLite in-memory database."
+            )
             self.db_url = "sqlite:///:memory:"
             self.engine = create_engine(self.db_url)
-            
+
         self.session_factory = sessionmaker(bind=self.engine)
         self.Session = scoped_session(self.session_factory)
-        
+
         self.create_tables()
-        
+
     def create_tables(self):
         try:
             Base.metadata.create_all(self.engine)
             logger.info("Postgres database schemas initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to create schema tables: {e}")
-            
-    def store_candidate(self, candidate_id: str, profile_data: Dict[str, Any], raw_text: Optional[str] = None) -> bool:
+
+    def store_candidate(
+        self,
+        candidate_id: str,
+        profile_data: Dict[str, Any],
+        raw_text: Optional[str] = None,
+    ) -> bool:
         """Store structured Candidate profile in permanent relational state."""
         session = self.Session()
         try:
@@ -78,7 +85,7 @@ class PostgresStateClient:
             if not candidate:
                 candidate = CandidateModel(id=candidate_id)
                 session.add(candidate)
-                
+
             candidate.name = profile_data.get("name", "Unknown")
             candidate.email = profile_data.get("email")
             candidate.phone = profile_data.get("phone")
@@ -87,7 +94,7 @@ class PostgresStateClient:
             candidate.education = profile_data.get("education", [])
             candidate.raw_text = raw_text or profile_data.get("raw_text", "")
             candidate.created_at = datetime.utcnow()
-            
+
             session.commit()
             logger.info(f"Successfully stored candidate profile: {candidate_id}")
             return True
@@ -97,7 +104,7 @@ class PostgresStateClient:
             return False
         finally:
             self.Session.remove()
-            
+
     def get_candidate(self, candidate_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve candidate profile details from tables."""
         session = self.Session()
@@ -114,7 +121,9 @@ class PostgresStateClient:
                 "experience": candidate.experience,
                 "education": candidate.education,
                 "raw_text": candidate.raw_text,
-                "created_at": candidate.created_at.isoformat() if candidate.created_at else None
+                "created_at": (
+                    candidate.created_at.isoformat() if candidate.created_at else None
+                ),
             }
         except Exception as e:
             logger.error(f"Error fetching candidate {candidate_id}: {e}")
@@ -130,7 +139,7 @@ class PostgresStateClient:
             if not jd:
                 jd = JobDescriptionModel(id=job_id)
                 session.add(jd)
-                
+
             jd.title = jd_data.get("title", "Unknown Job Title")
             jd.department = jd_data.get("department")
             jd.required_skills = jd_data.get("required_skills", [])
@@ -140,7 +149,7 @@ class PostgresStateClient:
             jd.visa_requirement = jd_data.get("visa_requirement")
             jd.full_text = jd_data.get("full_text", "")
             jd.created_at = datetime.utcnow()
-            
+
             session.commit()
             logger.info(f"Successfully stored job description: {job_id}")
             return True
@@ -168,7 +177,7 @@ class PostgresStateClient:
                 "location": jd.location,
                 "visa_requirement": jd.visa_requirement,
                 "full_text": jd.full_text,
-                "created_at": jd.created_at.isoformat() if jd.created_at else None
+                "created_at": jd.created_at.isoformat() if jd.created_at else None,
             }
         except Exception as e:
             logger.error(f"Error fetching job description {job_id}: {e}")
@@ -182,29 +191,35 @@ class PostgresStateClient:
         try:
             total_candidates = session.query(CandidateModel).count()
             total_jobs = session.query(JobDescriptionModel).count()
-            
+
             candidates = session.query(CandidateModel).all()
             total_exp_years = 0.0
             all_skills = []
-            
+
             for c in candidates:
                 exp_list = c.experience or []
                 months = sum(e.get("duration_months", 0) for e in exp_list)
-                total_exp_years += (months / 12.0)
+                total_exp_years += months / 12.0
                 all_skills.extend(c.skills or [])
-                
-            avg_exp = float(total_exp_years / total_candidates) if total_candidates > 0 else 0.0
-            
+
+            avg_exp = (
+                float(total_exp_years / total_candidates)
+                if total_candidates > 0
+                else 0.0
+            )
+
             skill_counts = {}
             for s in all_skills:
                 skill_counts[s] = skill_counts.get(s, 0) + 1
-            top_skills = dict(sorted(skill_counts.items(), key=lambda x: x[1], reverse=True)[:5])
-            
+            top_skills = dict(
+                sorted(skill_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            )
+
             return {
                 "total_candidates": total_candidates,
                 "total_jobs": total_jobs,
                 "avg_experience_years": round(avg_exp, 1),
-                "top_skills": top_skills
+                "top_skills": top_skills,
             }
         except Exception as e:
             logger.error(f"Failed to query dashboard metrics: {e}")
@@ -212,7 +227,7 @@ class PostgresStateClient:
                 "total_candidates": 0,
                 "total_jobs": 0,
                 "avg_experience_years": 0.0,
-                "top_skills": {}
+                "top_skills": {},
             }
         finally:
             self.Session.remove()

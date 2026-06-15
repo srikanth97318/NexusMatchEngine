@@ -75,15 +75,17 @@ def read_root():
 
 
 @app.post("/ingest/resume")
-async def ingest_resume(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def ingest_resume(
+    background_tasks: BackgroundTasks, file: UploadFile = File(...)
+):
     """Asynchronous endpoint queuing resume files for layout analysis."""
     logger.info(f"API request to ingest resume: {file.filename}")
-    
+
     # Save uploaded file bytes to workspace directory so Celery workers can access it
     upload_dir = Path("data/raw/candidate_resumes")
     upload_dir.mkdir(parents=True, exist_ok=True)
     temp_path = upload_dir / file.filename
-    
+
     try:
         content = await file.read()
         with open(temp_path, "wb") as f:
@@ -92,27 +94,25 @@ async def ingest_resume(background_tasks: BackgroundTasks, file: UploadFile = Fi
     except Exception as e:
         logger.error(f"Failed to save uploaded file: {e}")
         raise HTTPException(status_code=500, detail=f"File save failed: {e}")
-    
+
     # Queue task via Celery worker
     task = ingest_resume_pipeline.delay(str(temp_path))
-    return {
-        "status": "queued",
-        "task_id": task.id,
-        "filename": file.filename
-    }
+    return {"status": "queued", "task_id": task.id, "filename": file.filename}
 
 
 @app.post("/match")
 def match_candidates(query: MatchQuery):
     """Perform end-to-end matching: hybrid retrieval -> LambdaMART ranker -> LLM refinement."""
-    logger.info(f"Executing end-to-end matching query for Job: {query.job_description_id}...")
-    
+    logger.info(
+        f"Executing end-to-end matching query for Job: {query.job_description_id}..."
+    )
+
     postgres_client = get_postgres_client()
     qdrant_client = get_qdrant_client()
     embedder = get_embedder()
     ranker = get_ranker()
     llm_ranker = get_llm_ranker()
-    
+
     # 1. Save Job Description to PostgreSQL database for dashboard metrics aggregation
     try:
         jd_data = {
@@ -121,67 +121,77 @@ def match_candidates(query: MatchQuery):
             "required_skills": query.required_skills,
             "preferred_skills": [],
             "min_experience_years": query.min_experience_years,
-            "full_text": query.job_text
+            "full_text": query.job_text,
         }
         postgres_client.store_job_description(query.job_description_id, jd_data)
     except Exception as e:
-        logger.error(f"Failed to persist job description {query.job_description_id}: {e}")
-    
+        logger.error(
+            f"Failed to persist job description {query.job_description_id}: {e}"
+        )
+
     # 2. Embed query JD using BGE-M3
     embedded_query = embedder.generate_embeddings([query.job_text])[0]
-    
+
     # 3. Retrieve top candidates via Qdrant Hybrid search
     retrieved_candidates = qdrant_client.hybrid_search(
         dense_query=embedded_query["dense"],
         sparse_query=embedded_query["sparse"],
-        limit=query.top_k * 2
+        limit=query.top_k * 2,
     )
-    
+
     # 4. Feature Engineering and LTR Scoring (LightGBM)
     scored_candidates = []
     job_meta = {
         "required_skills": query.required_skills,
-        "min_experience_years": query.min_experience_years
+        "min_experience_years": query.min_experience_years,
     }
-    
+
     for cand in retrieved_candidates:
         # Query detailed candidate profile dynamically from PostgreSQL relational layer
         cand_db = postgres_client.get_candidate(cand["id"])
         if cand_db:
             candidate_data = {
                 "skills": cand_db.get("skills", []),
-                "experience": cand_db.get("experience", [])
+                "experience": cand_db.get("experience", []),
             }
             cand_name = cand_db.get("name", cand["payload"].get("name", "Unknown"))
         else:
             candidate_data = {
                 "skills": cand["payload"].get("skills", []),
-                "experience": [{"role": "Engineer", "duration_months": int(cand["payload"].get("years_exp", 0) * 12)}]
+                "experience": [
+                    {
+                        "role": "Engineer",
+                        "duration_months": int(
+                            cand["payload"].get("years_exp", 0) * 12
+                        ),
+                    }
+                ],
             }
             cand_name = cand["payload"].get("name", "Unknown")
-            
+
         features = build_ltr_features(candidate_data, job_meta, cand["score"])
         score = ranker.predict_ranking([features])[0]
         shap = ranker.generate_shap_values(features)
-        
-        scored_candidates.append({
-            "id": cand["id"],
-            "name": cand_name,
-            "initial_score": cand["score"],
-            "ltr_score": score,
-            "shap_values": shap
-        })
-        
+
+        scored_candidates.append(
+            {
+                "id": cand["id"],
+                "name": cand_name,
+                "initial_score": cand["score"],
+                "ltr_score": score,
+                "shap_values": shap,
+            }
+        )
+
     # Sort by LTR score
-    scored_candidates = sorted(scored_candidates, key=lambda x: x["ltr_score"], reverse=True)
-    
+    scored_candidates = sorted(
+        scored_candidates, key=lambda x: x["ltr_score"], reverse=True
+    )
+
     # 5. Final LLM Refinement Loop
-    refined = llm_ranker.rerank_list(scored_candidates[:query.top_k], query.job_text)
-    
-    return {
-        "job_id": query.job_description_id,
-        "results": refined
-    }
+    refined = llm_ranker.rerank_list(scored_candidates[: query.top_k], query.job_text)
+
+    return {"job_id": query.job_description_id, "results": refined}
 
 
 @app.get("/metrics")
